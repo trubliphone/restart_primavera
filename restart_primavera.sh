@@ -2,7 +2,7 @@
 
 #########################################
 # restarts coupled model after failures #
-# for HRCM on NEXCS                     #
+# for HRCM on NEXCS or ARCHER           #
 #########################################
 
 ###############
@@ -63,9 +63,9 @@ else
   echo "ERROR: $MACHINE is an invalid machine; valid options are: `echo ${MACHINES[@]} | sed 's/ /, /g'`.">&2 && exit;
 fi
 
-$VERBOSE && echo -e "MACHINE=$MACHINE"
-$VERBOSE && echo "SUITE=$SUITE"
+$VERBOSE && echo "MACHINE=$MACHINE"
 $VERBOSE && echo "SSH_CMD=$SSH_CMD"
+$VERBOSE && echo "SUITE=$SUITE"
 
 ############
 # do stuff #
@@ -88,19 +88,19 @@ $SSH_CMD << EOF
     SUITE_DIR="$REMOTE_DIR"
   fi  
   if [ ! -d \$SUITE_DIR ]; then
-    echo "ERROR: unable to find suite '\$SUITE_DIR' (@\$(hostname))" && exit;
+    echo "ERROR: unable to find suite '\$SUITE_DIR' (@\$(hostname))" >&2 && exit;
   fi
 
   # check cycle exists...
   if [[ -z "$CYCLE" ]]; then
     CYCLE_DIR=\$(ls -d \$SUITE_DIR/work/*/ 2>/dev/null | egrep '[0-9]{8}T[0-9]{4}[A-Z]/$' | tail -1)
     if [ ! -d \$CYCLE_DIR ]; then
-      echo "ERROR: unable to find latest cycle for '$SUITE' (@\$(hostname))" && exit;
+      echo "ERROR: unable to find latest cycle for '$SUITE' (@\$(hostname))" >&2 && exit;
     fi
   else
     CYCLE_DIR="\$SUITE_DIR/work/\$CYCLE"
     if [ ! -d \$CYCLE_DIR ]; then
-      echo "ERROR: unable to find cycle '\$CYCLE_DIR' (@\$(hostname))" && exit;
+      echo "ERROR: unable to find cycle '\$CYCLE_DIR' (@\$(hostname))" >&2 && exit;
     fi
   fi
 
@@ -152,7 +152,7 @@ $SSH_CMD << EOF
   done <<< "\$(find \$DATA_DIR_UM -maxdepth 1 -regextype posix-extended -regex "^\$DATA_DIR_UM/${SUITE_BASE}.*[0-9]{8}_[0-9]{2}$" -type f)"
 
   if [ -z "\$RESTART_DUMP_UM" ]; then
-    echo "ERROR: unable to find a suitable UM restart dump" && exit
+    echo "ERROR: unable to find a suitable UM restart dump" >&2 && exit
   fi
 
   # replace the history file...
@@ -160,16 +160,16 @@ $SSH_CMD << EOF
   PREV_HISTORY=\$(ls \$PREV_CYCLE_DIR/coupled/history_archive/temp_hist.* | tail -1)
   FUTURE_DUMP=\$(grep CHECKPOINT_DUMP_IM \$PREV_HISTORY | awk '{print \$4}')
   if [[ \$FUTURE_DUMP =~ \$PREV_HISTORY ]]; then
-    echo "ERROR: UM history file does not point to the appropriate restart dump" && exit 
+    echo "ERROR: UM history file does not point to the appropriate restart dump" >&2 && exit 
   fi
   cp \$PREV_HISTORY \$DATA_DIR_UM/$SUITE_BASE.xhist
   $VERBOSE && echo "setting history file to \$PREV_HISTORY"
 
   # perturb the dump...
   $VERBOSE && echo "perturbing the dump (this may take a while)...
-  if [ MACHINE = "NEXCS" ]; then 
+  if [ $MACHINE == "NEXCS" ]; then 
     /home/d05/hadom/Var/random_temp_perturb_seed_cray \$RESTART_DUMP_UM \$RESTART_DUMP_UM.pert
-  elif [ MACHINE = "ARCHER" ]; then
+  elif [ $MACHINE == "ARCHER" ]; then
     module load anaconda
     export PYTHONPATH=\${PYTHONPATH=}:/work/y07/y07/umshared/mule/mule-2017.08.1/python2.7/lib
     python2.7 /home/n02/shared/mjrobe/perturb_theta.py --output \$RESTART_DUMP_UM.pert \$RESTART_DUMP_UM
@@ -202,7 +202,7 @@ $SSH_CMD << EOF
   done <<< "\$(find \$DATA_DIR_NEMO -maxdepth 1 -regextype posix-extended -regex "^\$DATA_DIR_NEMO/${SUITE_BASE}o_.*[0-9]{8}_restart.*$" -type f)"
 
   if [ -z "\$RESTART_DUMP_NEMO" ]; then
-    echo "ERROR: unable to find any suitable NEMO restart dumps" && exit
+    echo "ERROR: unable to find any suitable NEMO restart dumps" >&2 && exit
   fi
 
   ##############
@@ -230,7 +230,7 @@ $SSH_CMD << EOF
  done <<< "\$(find \$DATA_DIR_CICE -maxdepth 1 -regextype posix-extended -regex "^\$DATA_DIR_CICE/${SUITE_BASE}i\.restart\..*\.nc$" -type f)"
 
   if [ -z "\$RESTART_DUMP_CICE" ]; then
-    echo "ERROR: unable to find a suitable CICE restart dump" && exit
+    echo "ERROR: unable to find a suitable CICE restart dump" >&2 && exit
   fi
 
   # point the restart file to the appropirate restart dump...
