@@ -16,19 +16,20 @@ USER=$USER;
 SUITE="";
 CYCLE="";
 SUITE_DIR="";
+TEST=false;
 VERBOSE=false;
 
 #########
 # usage #
 #########
 
-USAGE="Usage: `basename $0` -m <host machine: [`echo ${MACHINES[@]} | sed 's/ /|/g'`]> -s <suite-id> [-u <host user> (defaults to current user)] [-c <cycle-point> (defaults to last cycle)] [-d <suite directory on host machine> (useful if user is not the suite owner)] [-v (verbose)]"
+USAGE="Usage: `basename $0` -m <host machine: [`echo ${MACHINES[@]} | sed 's/ /|/g'`]> -s <suite-id> [-u <host user> (defaults to current user)] [-c <cycle-point> (defaults to last cycle)] [-d <suite directory on host machine> (useful if user is not the suite owner)] [-t (test mode)] [-v (verbose)]"
 
 #############################
 # get (and check) arguments #
 #############################
 
-while getopts m:u:s:c:d:v OPT
+while getopts m:u:s:c:d:tv OPT
 do
   case $OPT in
     m) MACHINE="$OPTARG";;
@@ -36,6 +37,7 @@ do
     s) SUITE="$OPTARG";;
     c) CYCLE="$OPTARG";;
     d) REMOTE_DIR="$OPTARG";;
+    t) TEST=true;;
     v) VERBOSE=true;;
     *) echo $USAGE>&2;
        exit;;
@@ -63,9 +65,9 @@ else
   echo "ERROR: $MACHINE is an invalid machine; valid options are: `echo ${MACHINES[@]} | sed 's/ /, /g'`.">&2 && exit;
 fi
 
-$VERBOSE && echo "MACHINE=$MACHINE"
-$VERBOSE && echo "SSH_CMD=$SSH_CMD"
-$VERBOSE && echo "SUITE=$SUITE"
+$VERBOSE || $TEST && echo "MACHINE=$MACHINE"
+$VERBOSE || $TEST && echo "SSH_CMD=$SSH_CMD"
+$VERBOSE || $TEST && echo "SUITE=$SUITE"
 
 ############
 # do stuff #
@@ -121,11 +123,11 @@ $SSH_CMD << EOF
     PREV_CYCLE=\$(basename \$PREV_CYCLE_DIR)
   done <<< "\$(ls -d \$SUITE_DIR/work/*/)"
 
-  $VERBOSE && echo "SUITE_DIR=\$SUITE_DIR"
-  $VERBOSE && echo "CYCLE=\$CYCLE"
-  $VERBOSE && echo "CYCLE_DIR=\$CYCLE_DIR"
-  $VERBOSE && echo "PREV_CYCLE=\$PREV_CYCLE"
-  $VERBOSE && echo "PREV_CYCLE_DIR=\$PREV_CYCLE_DIR"
+  $VERBOSE || $TEST && echo "SUITE_DIR=\$SUITE_DIR"
+  $VERBOSE || $TEST && echo "CYCLE=\$CYCLE"
+  $VERBOSE || $TEST && echo "CYCLE_DIR=\$CYCLE_DIR"
+  $VERBOSE || $TEST && echo "PREV_CYCLE=\$PREV_CYCLE"
+  $VERBOSE || $TEST && echo "PREV_CYCLE_DIR=\$PREV_CYCLE_DIR"
 
   ############
   # UM stuff #
@@ -144,10 +146,12 @@ $SSH_CMD << EOF
     DUMP_DAY="\${BASH_REMATCH[3]}"
     if [ "\$DUMP_YEAR\$DUMP_MONTH\$DUMP_DAY" -eq "\$CYCLE_YEAR\$CYCLE_MONTH\$CYCLE_DAY" ]; then
       RESTART_DUMP_UM=\$DUMP
-      $VERBOSE && echo "UM restart dump=\$DUMP
+      $VERBOSE || $TEST && echo "UM restart dump=\$DUMP"
     elif [ "\$DUMP_YEAR\$DUMP_MONTH\$DUMP_DAY" -gt "\$CYCLE_YEAR\$CYCLE_MONTH\$CYCLE_DAY" ]; then
-      mv \$DUMP \$DATA_DIR_UM/tmp
-      $VERBOSE && echo "getting rid of later UM restart dump \$DUMP"
+      $TEST || mv \$DUMP \$DATA_DIR_UM/tmp
+      $VERBOSE || $TEST && echo "getting rid of later UM restart dump \$DUMP"
+    else
+      $TEST && echo "ignoring earlier UM restart dump \$DUMP"
     fi
   done <<< "\$(find \$DATA_DIR_UM -maxdepth 1 -regextype posix-extended -regex "^\$DATA_DIR_UM/${SUITE_BASE}.*[0-9]{8}_[0-9]{2}$" -type f)"
 
@@ -156,26 +160,32 @@ $SSH_CMD << EOF
   fi
 
   # replace the history file...
-  mv "\$DATA_DIR_UM/$SUITE_BASE.xhist" \$DATA_DIR_UM/tmp
+  $TEST || mv "\$DATA_DIR_UM/$SUITE_BASE.xhist" \$DATA_DIR_UM/tmp
   PREV_HISTORY=\$(ls \$PREV_CYCLE_DIR/coupled/history_archive/temp_hist.* | tail -1)
   FUTURE_DUMP=\$(grep CHECKPOINT_DUMP_IM \$PREV_HISTORY | awk '{print \$4}')
   if [[ \$FUTURE_DUMP =~ \$PREV_HISTORY ]]; then
     echo "ERROR: UM history file does not point to the appropriate restart dump" >&2 && exit 
   fi
   cp \$PREV_HISTORY \$DATA_DIR_UM/$SUITE_BASE.xhist
-  $VERBOSE && echo "setting history file to \$PREV_HISTORY"
+  $VERBOSE || $TEST && echo "setting history file to \$PREV_HISTORY"
 
   # perturb the dump...
-  $VERBOSE && echo "perturbing the dump (this may take a while)...
+  $VERBOSE || $TEST && echo "perturbing the dump (this may take a while)..."
   if [ $MACHINE == "NEXCS" ]; then 
-    /home/d05/hadom/Var/random_temp_perturb_seed_cray \$RESTART_DUMP_UM \$RESTART_DUMP_UM.pert
+    $TEST || /home/d05/hadom/Var/random_temp_perturb_seed_cray \$RESTART_DUMP_UM \$RESTART_DUMP_UM.pert
+    $TEST && echo "/home/d05/hadom/Var/random_temp_perturb_seed_cray \$RESTART_DUMP_UM \$RESTART_DUMP_UM.pert"
   elif [ $MACHINE == "ARCHER" ]; then
-    module load anaconda
-    export PYTHONPATH=\${PYTHONPATH=}:/work/y07/y07/umshared/mule/mule-2017.08.1/python2.7/lib
-    python2.7 /home/n02/shared/mjrobe/perturb_theta.py --output \$RESTART_DUMP_UM.pert \$RESTART_DUMP_UM
+    $TEST || module load anaconda
+    $TEST && echo "module load anaconda"
+    $TEST || export PYTHONPATH=\${PYTHONPATH=}:/work/y07/y07/umshared/mule/mule-2017.08.1/python2.7/lib
+    $TEST && echo "export PYTHONPATH=\${PYTHONPATH=}:/work/y07/y07/umshared/mule/mule-2017.08.1/python2.7/lib"
+    $TEST || python2.7 /home/n02/shared/mjrobe/perturb_theta.py --output \$RESTART_DUMP_UM.pert \$RESTART_DUMP_UM
+    $TEST && echo "python2.7 /home/n02/shared/mjrobe/perturb_theta.py --output \$RESTART_DUMP_UM.pert \$RESTART_DUMP_UM"
   fi
-  mv \$RESTART_DUMP_UM \$RESTART_DUMP_UM.orig
-  ln -s \$RESTART_DUMP_UM.pert \$RESTART_DUMP_UM
+  $TEST || mv \$RESTART_DUMP_UM \$RESTART_DUMP_UM.orig
+  $TEST && echo "mv \$RESTART_DUMP_UM \$RESTART_DUMP_UM.orig"
+  $TEST || ln -s \$RESTART_DUMP_UM.pert \$RESTART_DUMP_UM
+  $TEST && echo "ln -s \$RESTART_DUMP_UM.pert \$RESTART_DUMP_UM"
 
   ##############
   # NEMO stuff #
@@ -194,10 +204,12 @@ $SSH_CMD << EOF
     DUMP_DAY="\${BASH_REMATCH[3]}"
     if [ "\$DUMP_YEAR\$DUMP_MONTH\$DUMP_DAY" -eq "\$CYCLE_YEAR\$CYCLE_MONTH\$CYCLE_DAY" ]; then
       RESTART_DUMP_NEMO=\$DUMP
-      $VERBOSE && echo "NEMO restart dump=\$DUMP"
+      $VERBOSE || $TEST && echo "NEMO restart dump=\$DUMP"
     elif [ "\$DUMP_YEAR\$DUMP_MONTH\$DUMP_DAY" -gt "\$CYCLE_YEAR\$CYCLE_MONTH\$CYCLE_DAY" ]; then
-      mv \$DUMP \$DATA_DIR_NEMO/tmp
-      $VERBOSE && echo "getting rid of later NEMO restart dump \$DUMP"
+      $TEST || mv \$DUMP \$DATA_DIR_NEMO/tmp
+      $VERBOSE || $TEST && echo "getting rid of later NEMO restart dump \$DUMP"
+    else
+      $TEST && echo "ignoring earlier NEMO restart dump \$DUMP"
     fi
   done <<< "\$(find \$DATA_DIR_NEMO -maxdepth 1 -regextype posix-extended -regex "^\$DATA_DIR_NEMO/${SUITE_BASE}o_.*[0-9]{8}_restart.*$" -type f)"
 
@@ -222,10 +234,12 @@ $SSH_CMD << EOF
     DUMP_DAY="\${BASH_REMATCH[3]}"
     if [ "\$DUMP_YEAR\$DUMP_MONTH\$DUMP_DAY" -eq "\$CYCLE_YEAR\$CYCLE_MONTH\$CYCLE_DAY" ]; then
       RESTART_DUMP_CICE=\$DUMP
-      $VERBOSE && echo "CICE restart dump=\$DUMP"
+      $VERBOSE || $TEST && echo "CICE restart dump=\$DUMP"
     elif [ "\$DUMP_YEAR\$DUMP_MONTH\$DUMP_DAY" -gt "\$CYCLE_YEAR\$CYCLE_MONTH\$CYCLE_DAY" ]; then
-      mv \$DUMP \$DATA_DIR_CICE/tmp
-      $VERBOSE && echo "getting rid of later CICE restart dump \$DUMP"
+      $TEST || mv \$DUMP \$DATA_DIR_CICE/tmp
+      $VERBOSE || $TEST && echo "getting rid of later CICE restart dump \$DUMP"
+    else
+      $TEST && echo "ignoring earlier CICE restart dump \$DUMP"
     fi
  done <<< "\$(find \$DATA_DIR_CICE -maxdepth 1 -regextype posix-extended -regex "^\$DATA_DIR_CICE/${SUITE_BASE}i\.restart\..*\.nc$" -type f)"
 
@@ -234,8 +248,10 @@ $SSH_CMD << EOF
   fi
 
   # point the restart file to the appropirate restart dump...
-  cp "\$DATA_DIR_CICE/ice_restart.file" "\$DATA_DIR_CICE/ice_restart.file.orig"
-  echo \$RESTART_DUMP_CICE > "\$DATA_DIR_CICE/ice_restart.file"
+  $TEST || cp "\$DATA_DIR_CICE/ice.restart_file" "\$DATA_DIR_CICE/ice.restart_file.orig"
+  $TEST && echo "cp '\$DATA_DIR_CICE/ice.restart_file' '\$DATA_DIR_CICE/ice.restart_file.orig'"
+  $TEST || echo \$RESTART_DUMP_CICE > "\$DATA_DIR_CICE/ice.restart_file"
+  $TEST && echo "echo \$RESTART_DUMP_CICE > '\$DATA_DIR_CICE/ice.restart_file'"
 
   #######################
   # hooray, you're done #
@@ -250,4 +266,4 @@ EOF
 #######################
 
 exit
-
+ 
